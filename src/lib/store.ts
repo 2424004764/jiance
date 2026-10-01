@@ -12,7 +12,7 @@ function newShareId(): string {
 }
 
 /** localStorage 超配额（大量本地上传时）不应导致应用崩溃 */
-const safeLocalStorage = {
+export const safeLocalStorage = {
   getItem: (name: string): string | null => {
     try {
       return localStorage.getItem(name)

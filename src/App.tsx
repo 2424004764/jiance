@@ -6,6 +6,7 @@ import { HomePage } from './pages/HomePage'
 import { AlbumsPage } from './pages/AlbumsPage'
 import { AlbumDetailPage } from './pages/AlbumDetailPage'
 import { SharedAlbumPage } from './pages/SharedAlbumPage'
+import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
 function ScrollToTop() {
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/albums" element={<AlbumsPage />} />
           <Route path="/album/:id" element={<AlbumDetailPage />} />
           <Route path="/s/:shareId" element={<SharedAlbumPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>

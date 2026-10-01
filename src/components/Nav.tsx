@@ -1,13 +1,79 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
-import { Aperture, House, Images, Plus, UploadSimple, Camera, FolderPlus, X } from '@phosphor-icons/react'
+import {
+  Aperture,
+  CaretDown,
+  House,
+  Images,
+  Plus,
+  SignIn,
+  SignOut,
+  UploadSimple,
+  Camera,
+  FolderPlus,
+  X,
+} from '@phosphor-icons/react'
 import { useUpload } from '../lib/useUpload'
+import { beginLogin, oauthConfigured, type OAuthUser } from '../lib/oauth'
+import { logout, useAuth } from '../lib/auth'
+import { useToasts } from '../lib/store'
+
+function UserAvatar({ user, size = 26 }: { user: OAuthUser; size?: number }) {
+  const [broken, setBroken] = useState(false)
+  if (user.avatar && !broken) {
+    return (
+      <img
+        className="user-avatar"
+        src={user.avatar}
+        alt={user.username}
+        width={size}
+        height={size}
+        onError={() => setBroken(true)}
+      />
+    )
+  }
+  return (
+    <span
+      className="user-avatar user-avatar-fallback"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
+      aria-hidden="true"
+    >
+      {(user.username || '?').trim().charAt(0).toUpperCase()}
+    </span>
+  )
+}
 
 export function Nav() {
   const upload = useUpload()
   const navigate = useNavigate()
   const [sheetOpen, setSheetOpen] = useState(false)
+  const user = useAuth((s) => s.user)
+  const toast = useToasts((s) => s.toast)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuOpen])
+
+  const startLogin = () => {
+    if (!oauthConfigured) {
+      toast('主站登录尚未配置（缺少 VITE_OAUTH_CLIENT_ID）', 'error')
+      return
+    }
+    void beginLogin()
+  }
+
+  const doLogout = () => {
+    setMenuOpen(false)
+    void logout()
+    toast('已退出登录', 'info')
+  }
 
   const createAlbum = () => {
     setSheetOpen(false)
@@ -43,6 +109,53 @@ export function Nav() {
               <Plus size={16} weight="bold" />
               新建相册
             </button>
+
+            {user ? (
+              <div className="user-zone">
+                <button
+                  className="user-chip"
+                  onClick={() => setMenuOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                >
+                  <UserAvatar user={user} />
+                  <span className="user-chip-name">{user.username}</span>
+                  <CaretDown size={12} className="user-caret" />
+                </button>
+                <AnimatePresence>
+                  {menuOpen && (
+                    <>
+                      <div className="user-menu-mask" onClick={() => setMenuOpen(false)} />
+                      <motion.div
+                        className="user-menu glass"
+                        role="menu"
+                        initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                        transition={{ duration: 0.18 }}
+                      >
+                        <div className="user-menu-head">
+                          <UserAvatar user={user} size={40} />
+                          <div className="user-menu-info">
+                            <strong>{user.username}</strong>
+                            <span>{user.email || `ID ${user.sub}`}</span>
+                          </div>
+                        </div>
+                        <button className="user-menu-logout" role="menuitem" onClick={doLogout}>
+                          <SignOut size={16} weight="bold" />
+                          退出登录
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <button className="btn btn-ghost login-btn" onClick={startLogin}>
+                <SignIn size={16} weight="bold" />
+                登录
+              </button>
+            )}
           </div>
         </div>
       </header>
