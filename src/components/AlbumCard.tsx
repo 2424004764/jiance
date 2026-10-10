@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
 import { motion, useReducedMotion } from 'motion/react'
-import { Lock, ImageSquare } from '@phosphor-icons/react'
+import { Lock, ImageSquare, PushPin } from '@phosphor-icons/react'
 import type { Album, Photo } from '../lib/types'
 import { relativeTime } from '../lib/format'
+import { useT } from '../lib/i18n'
+import { LoadingImage } from './LoadingImage'
 
 interface Props {
   album: Album
@@ -11,6 +13,7 @@ interface Props {
 }
 
 export function AlbumCard({ album, covers, delay = 0 }: Props) {
+  const { t } = useT()
   const reduce = useReducedMotion()
 
   return (
@@ -24,7 +27,7 @@ export function AlbumCard({ album, covers, delay = 0 }: Props) {
         <div className="album-collage">
           {[0, 1, 2, 3].map((i) =>
             covers[i] ? (
-              <img key={i} src={covers[i].url} alt="" loading="lazy" />
+              <LoadingImage key={i} src={covers[i].url} alt="" loading="lazy" />
             ) : (
               <div key={i} className="tile-empty">
                 <ImageSquare size={20} />
@@ -34,14 +37,20 @@ export function AlbumCard({ album, covers, delay = 0 }: Props) {
           {album.password && (
             <span className="album-lock">
               <Lock size={12} weight="fill" />
-              加密
+              {t('detail.locked')}
+            </span>
+          )}
+          {album.type === 'wall' && (
+            <span className="album-type">
+              <PushPin size={11} weight="fill" />
+              {t('form.typeWall')}
             </span>
           )}
         </div>
         <div className="album-info">
           <h3>{album.name}</h3>
           <p>
-            {album.photoIds.length} 张照片 · {relativeTime(album.updatedAt)}更新
+            {t('detail.meta', { n: album.photoIds.length, t: relativeTime(album.updatedAt) })}
           </p>
         </div>
       </Link>

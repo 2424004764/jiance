@@ -3,21 +3,23 @@ import { Link } from 'react-router-dom'
 import { Compass } from '@phosphor-icons/react'
 import { PageTransition } from '../components/PageTransition'
 import { EmptyState } from '../components/EmptyState'
+import { useT } from '../lib/i18n'
 
 export function NotFoundPage() {
+  const { t, lang } = useT()
   useEffect(() => {
-    document.title = '页面不存在 · 拾光集'
-  }, [])
+    document.title = t('nf.docTitle')
+  }, [t, lang])
 
   return (
     <PageTransition>
       <EmptyState
         icon={<Compass size={30} weight="thin" />}
-        title="走丢了"
-        desc="这个页面不存在，回到首页继续浏览"
+        title={t('nf.title')}
+        desc={t('nf.desc')}
         action={
           <Link className="btn btn-primary" to="/">
-            回到首页
+            {t('nf.cta')}
           </Link>
         }
       />

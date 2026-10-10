@@ -3,7 +3,10 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   Aperture,
+  ArrowSquareOut,
   CaretDown,
+  Database,
+  Globe,
   House,
   Images,
   Plus,
@@ -15,9 +18,12 @@ import {
   X,
 } from '@phosphor-icons/react'
 import { useUpload } from '../lib/useUpload'
-import { beginLogin, oauthConfigured, type OAuthUser } from '../lib/oauth'
+import { beginLogin, oauthConfigured, oauthCreditsUrl, type OAuthUser } from '../lib/oauth'
 import { logout, useAuth } from '../lib/auth'
 import { useToasts } from '../lib/store'
+import { fetchStorageQuota, ScopeMissingError, type StorageQuota } from '../lib/storage'
+import { formatBytes } from '../lib/format'
+import { switchLang, useT, type Lang } from '../lib/i18n'
 
 function UserAvatar({ user, size = 26 }: { user: OAuthUser; size?: number }) {
   const [broken, setBroken] = useState(false)
@@ -50,20 +56,54 @@ export function Nav() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const user = useAuth((s) => s.user)
   const toast = useToasts((s) => s.toast)
+  const { t, lang } = useT()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [quota, setQuota] = useState<StorageQuota | null>(null)
+  const [quotaState, setQuotaState] = useState<'idle' | 'loading' | 'ok' | 'scope' | 'error'>('idle')
+
+  // 每次打开菜单时刷新一次存储额度
+  useEffect(() => {
+    if (!menuOpen || !user) return
+    let alive = true
+    setQuotaState('loading')
+    fetchStorageQuota()
+      .then((q) => {
+        if (!alive) return
+        setQuota(q)
+        setQuotaState('ok')
+      })
+      .catch((e) => {
+        if (!alive) return
+        setQuotaState(e instanceof ScopeMissingError ? 'scope' : 'error')
+      })
+    return () => {
+      alive = false
+    }
+  }, [menuOpen, user])
 
   useEffect(() => {
     if (!menuOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false)
     }
+    // 顶栏的 backdrop-filter 会成为 fixed 遮罩的包含块，遮罩实际盖不住整页，
+    // 改为全局监听：点头像和菜单本体以外的任意位置关闭
+    const onPointerDown = (e: PointerEvent) => {
+      const el = e.target instanceof Element ? e.target : null
+      if (el?.closest('.user-menu, .user-zone')) return
+      setMenuOpen(false)
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
   }, [menuOpen])
 
   const startLogin = () => {
     if (!oauthConfigured) {
-      toast('主站登录尚未配置（缺少 VITE_OAUTH_CLIENT_ID）', 'error')
+      toast(t('toast.needConfig'), 'error')
       return
     }
     void beginLogin()
@@ -72,42 +112,77 @@ export function Nav() {
   const doLogout = () => {
     setMenuOpen(false)
     void logout()
-    toast('已退出登录', 'info')
+    toast(t('toast.loggedOut'), 'info')
+    // 画廊随登录态切回空白，回首页避免停留在已不存在的相册页
+    navigate('/')
+  }
+
+  /** 旧会话缺 storage 授权时，一键重新走授权（无需先退出登录） */
+  const reauthorize = () => {
+    if (!oauthConfigured) {
+      toast(t('toast.needConfig'), 'error')
+      return
+    }
+    setMenuOpen(false)
+    void beginLogin()
   }
 
   const createAlbum = () => {
     setSheetOpen(false)
+    if (!user) {
+      toast(t('toast.loginToCreate'), 'error')
+      return
+    }
     navigate('/albums?new=1')
   }
+
+  const toggleLang = () => switchLang(lang === 'zh' ? ('en' as Lang) : ('zh' as Lang))
 
   return (
     <>
       <header className="topbar">
         <div className="topbar-inner">
-          <Link to="/" className="brand" aria-label="拾光集 首页">
+          <Link to="/" className="brand" aria-label={t('brand')}>
             <span className="brand-mark">
               <Aperture size={21} weight="bold" />
             </span>
-            <span className="brand-name">拾光集</span>
+            <span className="brand-name">{t('brand')}</span>
           </Link>
 
-          <nav className="topbar-nav" aria-label="主导航">
-            <NavLink to="/" end className="topbar-link">
-              首页
-            </NavLink>
-            <NavLink to="/albums" className="topbar-link">
-              相册
-            </NavLink>
-          </nav>
+          {/* 首页/相册属于登录后的工作区，未登录（官网页）不显示 */}
+          {user && (
+            <nav className="topbar-nav" aria-label={t('nav.home')}>
+              <NavLink to="/" end className="topbar-link">
+                {t('nav.home')}
+              </NavLink>
+              <NavLink to="/albums" className="topbar-link">
+                {t('nav.albums')}
+              </NavLink>
+            </nav>
+          )}
 
           <div className="topbar-actions">
-            <button className="btn btn-ghost btn-desktop" onClick={() => upload(null)}>
-              <UploadSimple size={17} weight="bold" />
-              上传照片
-            </button>
-            <button className="btn btn-primary btn-desktop" onClick={createAlbum}>
-              <Plus size={16} weight="bold" />
-              新建相册
+            {user && (
+              <>
+                <button className="btn btn-ghost btn-desktop" onClick={() => upload(null)}>
+                  <UploadSimple size={17} weight="bold" />
+                  {t('nav.upload')}
+                </button>
+                <button className="btn btn-primary btn-desktop" onClick={createAlbum}>
+                  <Plus size={16} weight="bold" />
+                  {t('nav.newAlbum')}
+                </button>
+              </>
+            )}
+
+            <button
+              className="lang-btn"
+              onClick={toggleLang}
+              aria-label={t('nav.langSwitch')}
+              title={t('nav.langSwitch')}
+            >
+              <Globe size={16} weight="bold" />
+              {lang === 'zh' ? 'EN' : '中文'}
             </button>
 
             {user ? (
@@ -124,65 +199,102 @@ export function Nav() {
                 </button>
                 <AnimatePresence>
                   {menuOpen && (
-                    <>
-                      <div className="user-menu-mask" onClick={() => setMenuOpen(false)} />
-                      <motion.div
-                        className="user-menu glass"
-                        role="menu"
-                        initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                        transition={{ duration: 0.18 }}
-                      >
-                        <div className="user-menu-head">
-                          <UserAvatar user={user} size={40} />
-                          <div className="user-menu-info">
-                            <strong>{user.username}</strong>
-                            <span>{user.email || `ID ${user.sub}`}</span>
-                          </div>
+                    <motion.div
+                      className="user-menu glass"
+                      role="menu"
+                      initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                      transition={{ duration: 0.18 }}
+                    >
+                      <div className="user-menu-head">
+                        <UserAvatar user={user} size={40} />
+                        <div className="user-menu-info">
+                          <strong>{user.username}</strong>
+                          <span>{user.email || `ID ${user.sub}`}</span>
                         </div>
-                        <button className="user-menu-logout" role="menuitem" onClick={doLogout}>
-                          <SignOut size={16} weight="bold" />
-                          退出登录
-                        </button>
-                      </motion.div>
-                    </>
+                      </div>
+                      <div className="user-menu-quota">
+                        <div className="user-menu-quota-row">
+                          <span className="user-menu-quota-label">
+                            <Database size={14} weight="fill" />
+                            {t('nav.storage')}
+                          </span>
+                          {quotaState === 'loading' && (
+                            <span className="user-menu-quota-value muted">
+                              {t('nav.storageLoading')}
+                            </span>
+                          )}
+                          {quotaState === 'ok' && quota && (
+                            <span className="user-menu-quota-value">
+                              {formatBytes(quota.remaining_bytes)} / {formatBytes(quota.quota_bytes)}
+                            </span>
+                          )}
+                          {quotaState === 'scope' && (
+                            <button className="user-menu-quota-action" onClick={reauthorize}>
+                              {t('nav.storageScope')}
+                            </button>
+                          )}
+                          {quotaState === 'error' && (
+                            <span className="user-menu-quota-value muted">
+                              {t('nav.storageError')}
+                            </span>
+                          )}
+                        </div>
+                        <a
+                          className="user-menu-quota-manage"
+                          href={oauthCreditsUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {t('nav.manage')}
+                          <ArrowSquareOut size={12} />
+                        </a>
+                      </div>
+                      <button className="user-menu-logout" role="menuitem" onClick={doLogout}>
+                        <SignOut size={16} weight="bold" />
+                        {t('nav.logout')}
+                      </button>
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </div>
             ) : (
               <button className="btn btn-ghost login-btn" onClick={startLogin}>
                 <SignIn size={16} weight="bold" />
-                登录
+                {t('nav.login')}
               </button>
             )}
           </div>
         </div>
       </header>
 
-      <nav className="bottombar" aria-label="底部导航">
-        <div className="bottombar-inner">
-          <NavLink to="/" end className="bottom-link">
-            {({ isActive }) => (
-              <>
-                <House size={22} weight={isActive ? 'fill' : 'regular'} />
-                <span>首页</span>
-              </>
-            )}
-          </NavLink>
-          <button className="fab" onClick={() => setSheetOpen(true)} aria-label="上传或新建">
-            <Plus size={24} weight="bold" />
-          </button>
-          <NavLink to="/albums" className="bottom-link right">
-            {({ isActive }) => (
-              <>
-                <Images size={22} weight={isActive ? 'fill' : 'regular'} />
-                <span>相册</span>
-              </>
-            )}
-          </NavLink>
-        </div>
-      </nav>
+      {/* 移动端底部 tab 栏只服务登录后的工作区，未登录不渲染 */}
+      {user && (
+        <nav className="bottombar" aria-label={t('nav.home')}>
+          <div className="bottombar-inner">
+            <NavLink to="/" end className="bottom-link">
+              {({ isActive }) => (
+                <>
+                  <House size={22} weight={isActive ? 'fill' : 'regular'} />
+                  <span>{t('nav.home')}</span>
+                </>
+              )}
+            </NavLink>
+            <button className="fab" onClick={() => setSheetOpen(true)} aria-label={t('nav.quickActions')}>
+              <Plus size={24} weight="bold" />
+            </button>
+            <NavLink to="/albums" className="bottom-link">
+              {({ isActive }) => (
+                <>
+                  <Images size={22} weight={isActive ? 'fill' : 'regular'} />
+                  <span>{t('nav.albums')}</span>
+                </>
+              )}
+            </NavLink>
+          </div>
+        </nav>
+      )}
 
       <AnimatePresence>
         {sheetOpen && (
@@ -196,7 +308,7 @@ export function Nav() {
             <motion.div
               className="sheet-panel glass"
               role="dialog"
-              aria-label="快捷操作"
+              aria-label={t('nav.quickActions')}
               initial={{ y: 120, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 120, opacity: 0 }}
@@ -204,8 +316,8 @@ export function Nav() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="sheet-head">
-                <span>快捷操作</span>
-                <button className="btn-icon" onClick={() => setSheetOpen(false)} aria-label="关闭">
+                <span>{t('nav.quickActions')}</span>
+                <button className="btn-icon" onClick={() => setSheetOpen(false)} aria-label={t('nav.close')}>
                   <X size={17} />
                 </button>
               </div>
@@ -220,8 +332,8 @@ export function Nav() {
                   <Camera size={20} weight="bold" />
                 </span>
                 <span className="sheet-action-text">
-                  <strong>上传照片</strong>
-                  <small>新增照片进入首页时间流</small>
+                  <strong>{t('nav.uploadAction')}</strong>
+                  <small>{t('nav.uploadActionDesc')}</small>
                 </span>
               </button>
               <button className="sheet-action" onClick={createAlbum}>
@@ -229,8 +341,8 @@ export function Nav() {
                   <FolderPlus size={20} weight="bold" />
                 </span>
                 <span className="sheet-action-text">
-                  <strong>新建相册</strong>
-                  <small>整理照片并生成分享链接</small>
+                  <strong>{t('nav.newAlbumAction')}</strong>
+                  <small>{t('nav.newAlbumActionDesc')}</small>
                 </span>
               </button>
             </motion.div>

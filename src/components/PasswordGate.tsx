@@ -1,28 +1,37 @@
 import { useState } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { LockKey } from '@phosphor-icons/react'
+import { useT } from '../lib/i18n'
 
 interface Props {
   albumName: string
-  /** 返回是否验证通过 */
-  onSubmit: (password: string) => boolean
+  /** 返回是否验证通过（可异步，如通过服务端校验分享密码） */
+  onSubmit: (password: string) => boolean | Promise<boolean>
 }
 
 export function PasswordGate({ albumName, onSubmit }: Props) {
+  const { t } = useT()
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
   const [shakeKey, setShakeKey] = useState(0)
   const reduce = useReducedMotion()
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!value.trim()) return
-    if (onSubmit(value.trim())) {
-      setError('')
-    } else {
-      setError('密码不正确，请重试')
-      setShakeKey((k) => k + 1)
-    }
+    const password = value.trim()
+    if (!password || busy) return
+    setBusy(true)
+    Promise.resolve(onSubmit(password))
+      .then((ok) => {
+        if (ok) {
+          setError('')
+        } else {
+          setError(t('gate.error'))
+          setShakeKey((k) => k + 1)
+        }
+      })
+      .finally(() => setBusy(false))
   }
 
   return (
@@ -43,19 +52,19 @@ export function PasswordGate({ albumName, onSubmit }: Props) {
           <div className="gate-icon">
             <LockKey size={26} weight="fill" />
           </div>
-          <h1 className="gate-title">这个相册已上锁</h1>
-          <p className="gate-sub">输入「{albumName}」的访问密码继续查看</p>
+          <h1 className="gate-title">{t('gate.title')}</h1>
+          <p className="gate-sub">{t('gate.sub', { name: albumName })}</p>
           <input
             className="input gate-input"
             type="password"
-            placeholder="访问密码"
+            placeholder={t('gate.placeholder')}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             autoFocus
-            aria-label="访问密码"
+            aria-label={t('gate.placeholder')}
           />
-          <button type="submit" className="btn btn-primary btn-block">
-            解锁相册
+          <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
+            {t('gate.submit')}
           </button>
           <p className="gate-error" role="alert">
             {error}

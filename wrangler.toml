@@ -1,0 +1,18 @@
+# Cloudflare Pages 配置（wrangler pages deploy 会读取这里的绑定）
+name = "jiance"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-09-26"
+
+# 照片对象存储：按「应用 / uid / 日期」隔离对象 Key
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "jiance-photos"
+
+[vars]
+# R2 Key 的应用前缀，对应工具站「应用隔离」约定：{prefix}/{uid}/{YYYY-MM-DD}/{uuid}.{ext}
+R2_KEY_PREFIX = "jiance"
+# 浏览器直传 R2（S3 预签名 PUT）所需的非敏感配置；
+# 密钥对 R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY 用
+# `wrangler pages secret put <名称> --project-name jiance` 注入（R2 API Token）
+R2_ACCOUNT_ID = "974e77b1692d56d57b27a1cef7fcc08c"
+R2_BUCKET_NAME = "jiance-photos"

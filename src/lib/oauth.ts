@@ -11,6 +11,10 @@ const SERVER = (import.meta.env.VITE_OAUTH_SERVER ?? 'https://tool.fologde.com')
 const CLIENT_ID = import.meta.env.VITE_OAUTH_CLIENT_ID ?? ''
 
 export const oauthConfigured = CLIENT_ID !== ''
+/** 工具站地址（充值/管理存储额度等入口跳转用） */
+export const oauthServerUrl = SERVER
+/** 存储额度充值页（"管理 / 充值"入口直达） */
+export const oauthCreditsUrl = `${SERVER}/me/credits`
 
 export interface OAuthUser {
   /** 用户唯一 ID，与工具站 user.id 一致，作为本地账号映射键 */
@@ -48,7 +52,7 @@ interface LoginTx {
   createdAt: number
 }
 
-const TX_KEY = 'shiguang-oauth-tx'
+const TX_KEY = 'jiance-oauth-tx'
 /** 与授权码同寿命：10 分钟 */
 const TX_TTL = 10 * 60 * 1000
 
@@ -113,6 +117,8 @@ export async function beginLogin(returnTo: string = location.pathname + location
   url.searchParams.set('state', tx.state)
   url.searchParams.set('code_challenge', await sha256Base64Url(tx.verifier))
   url.searchParams.set('code_challenge_method', 'S256')
+  // profile 基础资料；storage 读写工具站存储额度（上传前校验剩余容量）
+  url.searchParams.set('scope', 'profile storage')
   location.href = url.toString()
 }
 

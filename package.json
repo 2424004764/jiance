@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:all": "wrangler pages dev -- npm run dev",
+    "dev:all": "npm run build && wrangler pages dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy dist --project-name jiance --branch main --commit-dirty=true"

@@ -1,0 +1,17 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://jiance.fologde.com",
+          "https://jiance-f3k.pages.dev",
+          "https://*.jiance-f3k.pages.dev",
+          "http://localhost:5173"
+        ],
+        "methods": ["PUT"],
+        "headers": ["content-type"]
+      },
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

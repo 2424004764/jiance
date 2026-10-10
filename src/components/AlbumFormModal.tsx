@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'motion/react'
-import { Eye, EyeSlash, Lock } from '@phosphor-icons/react'
-import type { Album } from '../lib/types'
-import { useGallery, useToasts } from '../lib/store'
+import { Eye, EyeSlash, Lock, PushPin, SquaresFour } from '@phosphor-icons/react'
+import type { Album, AlbumType } from '../lib/types'
+import { useGallery, useToasts, albumPhotos } from '../lib/store'
+import { autoArrange } from '../lib/wallLayout'
+import { DEFAULT_WALL_BG, WALL_PRESETS } from '../lib/wallPresets'
 import { Modal } from './Modal'
+import { useT } from '../lib/i18n'
 
 interface Props {
   open: boolean
@@ -19,9 +22,12 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
   const updateAlbum = useGallery((s) => s.updateAlbum)
   const toast = useToasts((s) => s.toast)
   const navigate = useNavigate()
+  const { t, lang } = useT()
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [type, setType] = useState<AlbumType>('grid')
+  const [background, setBackground] = useState(DEFAULT_WALL_BG)
   const [pwEnabled, setPwEnabled] = useState(false)
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
@@ -32,6 +38,8 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
     if (open) {
       setName(album?.name ?? '')
       setDescription(album?.description ?? '')
+      setType(album?.type ?? 'grid')
+      setBackground(album?.wall?.background ?? DEFAULT_WALL_BG)
       setPwEnabled(!!album?.password)
       setPassword(album?.password ?? '')
       setShowPw(false)
@@ -43,28 +51,49 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
     e.preventDefault()
     const pw = pwEnabled ? password.trim() : ''
     if (!name.trim()) {
-      setError('请输入相册名称')
+      setError(t('form.nameError'))
       setShakeKey((k) => k + 1)
       return
     }
     if (pwEnabled && pw.length < 4) {
-      setError('密码至少需要 4 位')
+      setError(t('form.pwError'))
       setShakeKey((k) => k + 1)
       return
     }
     if (isEdit && album) {
-      updateAlbum(album.id, { name: name.trim(), description: description.trim(), password: pw || null })
-      toast('相册已更新')
+      const patch: Parameters<typeof updateAlbum>[1] = {
+        name: name.trim(),
+        description: description.trim(),
+        password: pw || null,
+        type,
+      }
+      if (type === 'wall') {
+        // 已有布局则只换背景；首次切到照片墙时给存量照片生成初始散布
+        const existing = album.wall?.items ?? []
+        const items =
+          existing.length > 0
+            ? existing
+            : autoArrange(albumPhotos(useGallery.getState().photos, album.id))
+        patch.wall = { ...album.wall, background, items }
+      }
+      updateAlbum(album.id, patch)
+      toast(t('form.updated'))
     } else {
-      const created = createAlbum({ name: name.trim(), description: description.trim(), password: pw || null })
-      toast('相册已创建')
+      const created = createAlbum({
+        name: name.trim(),
+        description: description.trim(),
+        password: pw || null,
+        type,
+        wall: type === 'wall' ? { background, items: [] } : undefined,
+      })
+      toast(t('form.created'))
       navigate(`/album/${created.id}`)
     }
     onClose()
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={isEdit ? '编辑相册' : '新建相册'}>
+    <Modal open={open} onClose={onClose} title={isEdit ? t('form.editTitle') : t('form.newTitle')}>
       <motion.form
         key={shakeKey}
         onSubmit={submit}
@@ -73,11 +102,11 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
         noValidate
       >
         <div className="field">
-          <label htmlFor="album-name">名称</label>
+          <label htmlFor="album-name">{t('form.name')}</label>
           <input
             id="album-name"
             className="input"
-            placeholder="给这组照片起个名字"
+            placeholder={t('form.namePh')}
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={24}
@@ -86,12 +115,12 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
         </div>
 
         <div className="field">
-          <label htmlFor="album-desc">描述（可选）</label>
+          <label htmlFor="album-desc">{t('form.desc')}</label>
           <textarea
             id="album-desc"
             className="textarea"
             rows={2}
-            placeholder="一句话记录这组照片"
+            placeholder={t('form.descPh')}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             maxLength={60}
@@ -99,10 +128,58 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
         </div>
 
         <div className="field">
+          <label>{t('form.type')}</label>
+          <div className="type-row" role="radiogroup" aria-label={t('form.type')}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={type === 'grid'}
+              className={type === 'grid' ? 'type-card on' : 'type-card'}
+              onClick={() => setType('grid')}
+            >
+              <SquaresFour size={20} weight={type === 'grid' ? 'fill' : 'regular'} />
+              <strong>{t('form.typeGrid')}</strong>
+              <span>{t('form.typeGridDesc')}</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={type === 'wall'}
+              className={type === 'wall' ? 'type-card on' : 'type-card'}
+              onClick={() => setType('wall')}
+            >
+              <PushPin size={20} weight={type === 'wall' ? 'fill' : 'regular'} />
+              <strong>{t('form.typeWall')}</strong>
+              <span>{t('form.typeWallDesc')}</span>
+            </button>
+          </div>
+        </div>
+
+        {type === 'wall' && (
+          <div className="field">
+            <label>{t('form.wallBg')}</label>
+            <div className="bg-row" role="group" aria-label={t('form.wallBg')}>
+              {WALL_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={background === p.id ? 'bg-dot on' : 'bg-dot'}
+                  style={{ background: p.css }}
+                  onClick={() => setBackground(p.id)}
+                  aria-label={p.name[lang]}
+                  aria-pressed={background === p.id}
+                  title={p.name[lang]}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="field">
           <div className="switch-row">
             <span className="switch-label">
               <Lock size={15} weight={pwEnabled ? 'fill' : 'regular'} />
-              密码保护
+              {t('form.pwLock')}
             </span>
             <button
               type="button"
@@ -111,7 +188,7 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
               aria-checked={pwEnabled}
               data-on={pwEnabled}
               onClick={() => setPwEnabled((v) => !v)}
-              aria-label="切换密码保护"
+              aria-label={t('form.togglePw')}
             />
           </div>
           {pwEnabled && (
@@ -119,7 +196,7 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
               <input
                 className="input"
                 type={showPw ? 'text' : 'password'}
-                placeholder="访问密码，至少 4 位"
+                placeholder={t('form.pwPh')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 maxLength={20}
@@ -128,13 +205,13 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
                 type="button"
                 className="affix-btn"
                 onClick={() => setShowPw((v) => !v)}
-                aria-label={showPw ? '隐藏密码' : '显示密码'}
+                aria-label={showPw ? t('form.hidePw') : t('form.showPw')}
               >
                 {showPw ? <EyeSlash size={17} /> : <Eye size={17} />}
               </button>
             </div>
           )}
-          <small className="field-hint">开启后，通过分享链接访问需要先输入密码</small>
+          <small className="field-hint">{t('form.pwHint')}</small>
         </div>
 
         {error && (
@@ -145,10 +222,10 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
 
         <div className="modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>
-            取消
+            {t('form.cancel')}
           </button>
           <button type="submit" className="btn btn-primary">
-            {isEdit ? '保存修改' : '创建相册'}
+            {isEdit ? t('form.save') : t('form.create')}
           </button>
         </div>
       </motion.form>

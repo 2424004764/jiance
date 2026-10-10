@@ -10,6 +10,15 @@ interface AuthState {
   signOut: () => void
 }
 
+/** 旧品牌名的会话存储键，启动时一次性迁移，避免改名后登录态丢失 */
+const LEGACY_AUTH_KEY = 'shiguang-auth-v1'
+const AUTH_KEY = 'jiance-auth-v1'
+if (!safeLocalStorage.getItem(AUTH_KEY)) {
+  const legacy = safeLocalStorage.getItem(LEGACY_AUTH_KEY)
+  if (legacy) safeLocalStorage.setItem(AUTH_KEY, legacy)
+}
+safeLocalStorage.removeItem(LEGACY_AUTH_KEY)
+
 export const useAuth = create<AuthState>()(
   persist(
     (set) => ({
@@ -19,7 +28,7 @@ export const useAuth = create<AuthState>()(
       signOut: () => set({ user: null, tokens: null }),
     }),
     {
-      name: 'shiguang-auth-v1',
+      name: AUTH_KEY,
       storage: createJSONStorage(() => safeLocalStorage),
       version: 1,
     },

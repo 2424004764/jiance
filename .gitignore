@@ -4,3 +4,5 @@ dist
 .DS_Store
 .wrangler
 .dev.vars
+.zcode
+gui-test-screenshots

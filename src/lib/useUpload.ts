@@ -1,24 +1,23 @@
 import { useCallback } from 'react'
-import { useGallery, useToasts } from './store'
-import { pickImages, filesToPhotoInputs } from './upload'
+import { useAuth } from './auth'
+import { useToasts, useUploadModal } from './store'
+import { tr } from './i18n'
 
-/** 全局上传入口（mock：本地压缩后入库；后续接 Workers） */
+/**
+ * 全局上传入口：校验登录后打开上传弹窗（弹窗内选图预览、可选压缩、
+ * 展示空间用量，确认后批量上传 R2 并入库）。
+ */
 export function useUpload() {
-  const addPhotos = useGallery((s) => s.addPhotos)
   const toast = useToasts((s) => s.toast)
 
   return useCallback(
-    async (albumId: string | null) => {
-      const files = await pickImages()
-      if (!files || files.length === 0) return
-      const inputs = await filesToPhotoInputs(files)
-      if (inputs.length === 0) {
-        toast('未识别到图片文件', 'error')
+    (albumId: string | null) => {
+      if (!useAuth.getState().user) {
+        toast(tr('up.loginFirst'), 'error')
         return
       }
-      addPhotos(inputs, albumId)
-      toast(`已上传 ${inputs.length} 张照片`)
+      useUploadModal.getState().openUpload(albumId)
     },
-    [addPhotos, toast],
+    [toast],
   )
 }
