@@ -66,26 +66,41 @@ export default function App() {
   // 弹窗已打开时文件经由 pending 交接区 + 自定义事件转交 UploadModal。
   const [dragOver, setDragOver] = useState(false)
   const dragDepth = useRef(0)
+  /** 站内发起的拖拽（拖动页面里的图片 / 链接 / 选区）：Chromium 给图片拖拽也标
+      Files 类型（为支持拖出到桌面存为文件），按类型判断会误触发上传遮罩，
+      因此 dragstart 时记录来源，该拖拽结束前一律不当作外部文件 */
+  const internalDrag = useRef(false)
   const dropReady = !!uid && !pathname.startsWith('/s/') && !pathname.startsWith('/auth/')
   useEffect(() => {
     if (!dropReady) return
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files')
+    const onDragStart = () => {
+      internalDrag.current = true
+    }
+    const onDragEnd = () => {
+      internalDrag.current = false
+    }
     const onDragEnter = (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (internalDrag.current || !hasFiles(e)) return
       e.preventDefault()
       dragDepth.current++
       setDragOver(true)
     }
     const onDragOver = (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (internalDrag.current || !hasFiles(e)) return
       e.preventDefault() // 允许 drop
     }
     const onDragLeave = (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (internalDrag.current || !hasFiles(e)) return
       dragDepth.current = Math.max(0, dragDepth.current - 1)
       if (dragDepth.current === 0) setDragOver(false)
     }
     const onDrop = (e: DragEvent) => {
+      if (internalDrag.current) {
+        /* 站内拖拽落到页面上：只挡住默认行为（如导航到图片地址），不进上传流程 */
+        e.preventDefault()
+        return
+      }
       if (!hasFiles(e)) return
       e.preventDefault()
       dragDepth.current = 0
@@ -99,11 +114,15 @@ export default function App() {
         openUpload(routeAlbumId)
       }
     }
+    window.addEventListener('dragstart', onDragStart)
+    window.addEventListener('dragend', onDragEnd)
     window.addEventListener('dragenter', onDragEnter)
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('drop', onDrop)
     return () => {
+      window.removeEventListener('dragstart', onDragStart)
+      window.removeEventListener('dragend', onDragEnd)
       window.removeEventListener('dragenter', onDragEnter)
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('dragleave', onDragLeave)
