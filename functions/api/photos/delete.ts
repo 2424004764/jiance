@@ -5,12 +5,15 @@ import { postUpstreamJson } from '../_accounting'
 /* ============================================================
    POST /api/photos/delete —— 批量删除照片的 R2 对象并退还额度
    鉴权：Bearer access_token（到工具站 userinfo 验证并取 uid）
-   隔离：只接受 {应用前缀}/{uid}/ 前缀下的对象 key，其余一律
-         丢弃，防止越权删除他人对象；画廊清单由客户端经
-         /api/gallery 推送对齐，这里负责删对象本体
-   额度：删除前逐个 HEAD 拿真实大小，删完把合计退还工具站
-         （used_bytes 是工具站 D1 账本，退款即减账）；对象已不
-         存在（HEAD null）不参与退款，重复删除不会重复刷额度
+   隔离：只接受两个归属前缀下的对象 key，其余一律丢弃，防止
+         越权删除他人对象：
+           subsite/{uid}/…          统一凭证通道（现行），已计入主站额度
+           {应用前缀}/{uid}/…       旧直传通道（jiance/{uid}/…），从未计额
+         画廊清单由客户端经 /api/gallery 推送对齐，这里负责删对象本体
+   额度：删除前逐个 HEAD 拿真实大小，删完把【统一通道】对象的合计
+         退还工具站（used_bytes 是工具站 D1 账本，退款即减账）；
+         旧通道对象从未计过账，删除不退款，防止把其他来源的用量冲掉。
+         对象已不存在（HEAD null）不参与退款，重复删除不会重复刷额度
    ============================================================ */
 
 const MAX_KEYS = 200
@@ -77,14 +80,16 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: A
   }
 
   const prefix = env.R2_KEY_PREFIX || 'jiance'
-  const owned = `${prefix}/${uid}/`
+  // 统一凭证通道的对象已计入主站额度（删除要退款）；旧直传通道从未计额（删除不退款）
+  const subsiteOwned = `subsite/${uid}/`
+  const legacyOwned = `${prefix}/${uid}/`
   const keys = new Set<string>()
   for (const k of rawKeys) {
     if (typeof k !== 'string' || k.length === 0 || k.length > MAX_KEY_LEN) continue
-    if (!k.startsWith(owned)) continue
+    if (!k.startsWith(subsiteOwned) && !k.startsWith(legacyOwned)) continue
     // 与 /f/ 取图同规则：禁相对路径、反斜杠与保留命名空间段（_manifests 等）
     if (k.includes('..') || k.includes('\\')) continue
-    const rest = k.slice(owned.length)
+    const rest = k.startsWith(subsiteOwned) ? k.slice(subsiteOwned.length) : k.slice(legacyOwned.length)
     const segments = rest.split('/')
     if (segments.some((s) => s.length === 0 || s.startsWith('_'))) continue
     keys.add(k)
@@ -93,12 +98,13 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: A
     return jsonReply({ error: 'invalid_request', error_description: '没有可删除的对象' }, 400)
   }
 
-  // 先 HEAD 拿真实大小（用于退还额度），再批量删除。
-  // HEAD null（对象早已不存在）→ 跳过退款但 key 仍进批量删除（幂等无害）；
-  // HEAD 网络失败同理，宁可少退不虚报。
+  // 先 HEAD 拿真实大小，再批量删除。只有统一凭证通道的对象参与退款
+  // （旧通道对象从未计账）；HEAD null（对象早已不存在）→ 跳过退款但 key
+  // 仍进批量删除（幂等无害）；HEAD 网络失败同理，宁可少退不虚报。
   let refundBytes = 0
   let headFailures = 0
   for (const key of keys) {
+    if (!key.startsWith(subsiteOwned)) continue
     try {
       const obj = await env.PHOTOS.head(key)
       if (obj && typeof obj.size === 'number') refundBytes += obj.size

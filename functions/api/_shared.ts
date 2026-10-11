@@ -38,13 +38,9 @@ export interface R2BucketLike {
 
 export interface AppEnv {
   PHOTOS: R2BucketLike
-  /** R2 Key 应用前缀，默认 jiance */
+  /** 元数据命名空间（_manifests/_shares/_likes）与旧直传照片的应用前缀，默认 jiance；
+   *  现行照片统一在 subsite/{uid}/ 下（由工具站凭证端点生成，不经本站变量） */
   R2_KEY_PREFIX?: string
-  /* 浏览器直传（S3 预签名）所需；AccessKey/Secret 为 Pages 密钥 */
-  R2_ACCOUNT_ID?: string
-  R2_BUCKET_NAME?: string
-  R2_ACCESS_KEY_ID?: string
-  R2_SECRET_ACCESS_KEY?: string
 }
 
 /** URL 安全的随机对象名 */

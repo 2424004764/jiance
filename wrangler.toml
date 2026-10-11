@@ -3,16 +3,12 @@ name = "jiance"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-09-26"
 
-# 照片对象存储：按「应用 / uid / 日期」隔离对象 Key
+# 照片对象存储：现行上传走工具站统一凭证（key = subsite/{uid}/{upload_id}/{uuid}.{ext}，
+# 落在工具站为应用登记的专属桶）；本 binding 用于读取、删除对象与元数据命名空间
 [[r2_buckets]]
 binding = "PHOTOS"
 bucket_name = "jiance-photos"
 
 [vars]
-# R2 Key 的应用前缀，对应工具站「应用隔离」约定：{prefix}/{uid}/{YYYY-MM-DD}/{uuid}.{ext}
+# 元数据命名空间（_manifests/_shares/_likes）与旧直传照片（jiance/{uid}/…，只读兼容）的应用前缀
 R2_KEY_PREFIX = "jiance"
-# 浏览器直传 R2（S3 预签名 PUT）所需的非敏感配置；
-# 密钥对 R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY 用
-# `wrangler pages secret put <名称> --project-name jiance` 注入（R2 API Token）
-R2_ACCOUNT_ID = "974e77b1692d56d57b27a1cef7fcc08c"
-R2_BUCKET_NAME = "jiance-photos"

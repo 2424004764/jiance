@@ -1,10 +1,11 @@
 /* ============================================================
    工具站存储额度 + R2 上传 · 浏览器端 API 客户端
    额度数据来自工具站 /api/oauth/storage-quota（本站同源代理）。
-   上传优先「直传」：先向 /api/upload-ticket 申请预签名 URL
-   （服务端校验令牌与额度），浏览器直接 PUT 到 R2，照片字节流
-   不经过本站后端；直传未配置时自动降级为 /api/upload 代理上传。
-   两种路径都基于 XHR，均提供单张上传进度。
+   上传只走「直传」：向 /api/upload-ticket 申请工具站统一上传
+   凭证（key = subsite/{uid}/{upload_id}/{uuid}.{ext}，文件名段由
+   服务端随机生成，预扣在凭证签发时原子完成），浏览器直接 PUT
+   预签名 URL；任何失败直接抛错，无降级路径。基于 XHR，提供单张
+   上传进度；放弃/失败无需释放预扣，随凭证 15 分钟自动失效。
    ============================================================ */
 
 import { getAccessToken } from './auth'
@@ -97,8 +98,7 @@ interface UploadTicket {
   key: string
   url: string
   upload: { method: 'PUT'; url: string; headers: Record<string, string> }
-  /** 上传前预扣的额度预留 id；结算/释放都要带上（工具站未启用预留时缺省） */
-  reservation_id?: string | null
+  expires_in?: number
 }
 
 /** 上传单张图片（Blob）到 R2，返回同源取图地址 /f/{key}；onProgress 报告字节进度 */
@@ -110,38 +110,11 @@ export async function uploadPhoto(
   const token = await getAccessToken()
   if (!token) throw new NotLoggedInError()
 
-  const ticket = await fetchUploadTicket(token, blob)
-  if (ticket) {
-    // 直传：PUT 预签名 URL，Content-Type 必须与签名时完全一致；失败即失败，不转代理
-    try {
-      await xhrSend(ticket.upload.url, 'PUT', blob, ticket.upload.headers, onProgress)
-    } catch (e) {
-      // 上传失败释放预留（尽力而为；超时预留也会自动失效）
-      if (ticket.reservation_id) void releaseReservation(ticket.reservation_id)
-      throw e
-    }
-    // 结算实际用量（服务端以 R2 HEAD 核实大小；失败只影响记账展示，不影响上传结果）
-    await settleUploadUsage(ticket.key, ticket.reservation_id ?? null)
-    return { key: ticket.key, url: ticket.url, size: blob.size }
-  }
-  // 降级：代理上传（FormData 不手动设 Content-Type，交由浏览器带 multipart 边界）
-  const form = new FormData()
-  form.append('file', blob, filename)
-  const { text } = await xhrSend(
-    '/api/upload',
-    'POST',
-    form,
-    { Authorization: `Bearer ${token}` },
-    onProgress,
-  )
-  let data: Partial<UploadResult> | null = null
-  try {
-    data = JSON.parse(text) as Partial<UploadResult>
-  } catch {
-    /* 走下方格式校验 */
-  }
-  if (!data?.key || !data.url) throw new Error(tr('err.uploadData'))
-  return { key: data.key, url: data.url, size: data.size ?? blob.size }
+  // 直传：申请统一凭证后浏览器直接 PUT 预签名 URL，失败直接抛错
+  // （Content-Type 必须与签名时完全一致，Content-Length 由浏览器按 blob 大小携带）
+  const ticket = await fetchUploadTicket(token, blob, filename)
+  await xhrSend(ticket.upload.url, blob, ticket.upload.headers, onProgress)
+  return { key: ticket.key, url: ticket.url, size: blob.size }
 }
 
 /**
@@ -159,57 +132,33 @@ export async function deletePhotoObjects(keys: string[]): Promise<void> {
   if (!res.ok) throw await parseError(res)
 }
 
-/** 结算直传用量（真实大小由 /api/storage/settle 以 R2 HEAD 核实）；失败静默，不影响上传结果 */
-async function settleUploadUsage(key: string, reservationId: string | null): Promise<void> {
-  try {
-    await authedFetch('/api/storage/settle', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, reservation_id: reservationId }),
-    })
-  } catch {
-    /* 结算失败静默：预留超时自动失效，用量随后续操作对齐 */
-  }
-}
-
-/** 释放上传预留（放弃上传时调用）；幂等，失败静默 */
-async function releaseReservation(reservationId: string): Promise<void> {
-  try {
-    await authedFetch('/api/storage/release', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservation_id: reservationId }),
-    })
-  } catch {
-    /* 释放失败静默：预留超时自动失效 */
-  }
-}
-
-/** 申请直传凭证；仅「直传未配置」（501）返回 null 走代理，其余失败直接抛错 */
-async function fetchUploadTicket(token: string, blob: Blob): Promise<UploadTicket | null> {
+/** 申请统一上传凭证；失败直接抛错（额度 / scope / 会话过期已分类） */
+async function fetchUploadTicket(
+  token: string,
+  blob: Blob,
+  filename: string,
+): Promise<UploadTicket> {
   const res = await fetch('/api/upload-ticket', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content_type: blob.type, size: blob.size }),
+    body: JSON.stringify({ content_type: blob.type, size: blob.size, filename }),
   })
-  if (res.status === 501) return null
   if (!res.ok) throw await parseError(res)
   const data = (await res.json().catch(() => null)) as Partial<UploadTicket> | null
   if (!data?.key || !data.url || !data.upload?.url) throw new Error(tr('err.uploadData'))
   return data as UploadTicket
 }
 
-/** XHR 发送（PUT 直传 / POST 代理共用），带上传进度 */
+/** XHR 发送（PUT 预签名直传），带上传进度；2xx 视为成功，其余抛错 */
 function xhrSend(
   url: string,
-  method: 'PUT' | 'POST',
-  body: Blob | FormData,
+  body: Blob,
   headers: Record<string, string>,
   onProgress?: UploadProgressFn,
-): Promise<{ status: number; text: string }> {
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
-    xhr.open(method, url)
+    xhr.open('PUT', url)
     for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v)
     if (onProgress) {
       xhr.upload.onprogress = (e) => {
@@ -219,7 +168,7 @@ function xhrSend(
     xhr.onerror = () => reject(new Error(tr('err.requestFail', { code: 'network' })))
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve({ status: xhr.status, text: xhr.responseText })
+        resolve()
       } else {
         reject(parseStatusError(xhr.status, xhr.responseText))
       }

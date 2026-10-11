@@ -3,9 +3,9 @@ import { manifestKey, randomId, shareKey, type AppEnv } from './_shared'
 
 /* ============================================================
    GET/PUT /api/gallery —— 画廊元数据清单（相册 + 照片记录）
-   鉴权：Bearer access_token（到工具站 userinfo 验证并取 uid），与 /api/upload 同一套
-   存储：R2 _manifests/{应用前缀}/{uid}.json（照片本体仍在 {prefix}/{uid}/ 下；
-         清单是应用内部记账，不占工具站存储额度）
+   鉴权：Bearer access_token（到工具站 userinfo 验证并取 uid），与 /api/upload-ticket 同一套
+   存储：R2 _manifests/{应用前缀}/{uid}.json（照片本体在 subsite/{uid}/ 下，
+         旧直传通道在 {prefix}/{uid}/ 下；清单是应用内部记账，不占工具站存储额度）
    说明：整份清单读改写、字段白名单清洗；跨端冲突由前端按
          updatedAt 做 last-write-wins 合并后再推回
    ============================================================ */

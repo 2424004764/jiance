@@ -44,25 +44,26 @@
    │
    ├── /api/upload-ticket ──> 签发 S3 预签名 PUT（10 分钟有效）──> 浏览器直传 R2
    │        │                  └─ 签发前向工具站 storage-reserve 预扣额度
-   │        └─ 未配置直传密钥时回 501，前端自动降级为 /api/upload 代理上传
+   │        └─ 失败直接报错，无代理上传降级路径
    │
    ├── /api/gallery GET/PUT ──> 画廊清单（相册 + 照片元数据，按账号私有）
    ├── /api/share/:shareId ──> 公开只读分享数据（无需登录，可选密码门）
    ├── /api/storage/quota   ──> 工具站存储额度查询（上传前校验）
-   ├── /api/storage/settle  ──> 直传完成后按实际大小结算用量（R2 HEAD 核实）
    ├── /api/storage/release ──> 放弃上传时释放预留
    └── /f/:key ──> R2 照片公开读取
 ```
 
 存储额度记账：`used_bytes` 是工具站 D1 账本（`user_storage_quota`），不是扫 R2
-统计的。本站上传走「reserve 预扣 → settle 结算（真实大小以 R2 HEAD 为准）」，
-删除照片走「HEAD 量大小 → 删对象 → refund 退还」，四个记账端点
-（`/api/oauth/storage-*`）由工具站提供，本站只透传 Bearer 令牌。
+统计的。本站上传走工具站统一上传凭证（`storage-upload-credential`，签发即原子
+预扣），上传后的用量结算由工具站队列事件按 `upload_id` 幂等实扣；删除照片走
+「HEAD 量大小 → 删对象 → 仅统一通道对象 refund 退还」。本站不持有任何 R2 密钥，
+只透传 Bearer 令牌。
 
-R2 对象布局（`R2_KEY_PREFIX` 默认 `jiance`）：
+R2 对象布局：
 
 ```text
-{prefix}/{uid}/{YYYY-MM-DD}/{32位随机串}.{ext}   # 照片本体
+subsite/{uid}/{upload_id}/{uuid}.{ext}            # 照片本体（统一凭证通道，计入主站额度）
+{prefix}/{uid}/{YYYY-MM-DD}/{32位随机串}.{ext}    # 旧直传通道照片（只读兼容，未计额）
 _manifests/{prefix}/{uid}.json                    # 画廊清单（应用内部记账）
 _shares/{prefix}/{shareId}                        # 分享索引：shareId → 属主 uid
 ```
@@ -80,8 +81,8 @@ npm run dev:all    # 先构建，再 wrangler pages dev（带 Functions 与 R2 �
 ```
 
 - `.env.local`：`VITE_OAUTH_CLIENT_ID`（必填）、`VITE_OAUTH_SERVER`（默认 `https://tool.fologde.com`）
-- `.dev.vars`：本地 Pages Functions 密钥，至少放 `OAUTH_CLIENT_SECRET`；需要联调 R2 直传时再加 `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`（R2 API Token）
-- 工具站管理后台的回调地址白名单需加入 `http://localhost:5175/auth/callback`
+- `.dev.vars`：本地 Pages Functions 密钥，放 `OAUTH_CLIENT_SECRET` 即可（上传凭证由工具站签发，本站不再需要 R2 API Token）
+- 工具站管理后台的回调地址白名单需加入 `http://localhost:5175/auth/callback`，并在「OAuth 应用 → 编辑」为应用登记 R2 桶名（`jiance-photos`），否则上传返回 `403 upload_not_enabled`
 
 ## 部署
 
@@ -91,8 +92,7 @@ npx wrangler r2 bucket create jiance-photos
 
 # 2. 配置生产密钥
 npx wrangler pages secret put OAUTH_CLIENT_SECRET --project-name jiance
-npx wrangler pages secret put R2_ACCESS_KEY_ID    --project-name jiance   # R2 API Token
-npx wrangler pages secret put R2_SECRET_ACCESS_KEY --project-name jiance
+# 历史遗留的 R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY 可从 Pages 密钥中删除（已不再使用）
 
 # 3. 发布
 npm run deploy
