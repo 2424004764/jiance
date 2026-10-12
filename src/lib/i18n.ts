@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect } from 'react'
 import { create } from 'zustand'
-import { safeLocalStorage } from './store'
+import { safeLocalStorage } from './localStorage'
 
 export type Lang = 'zh' | 'en'
 

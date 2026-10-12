@@ -1,4 +1,4 @@
-import { safeLocalStorage } from './store'
+import { safeLocalStorage } from './localStorage'
 
 /* ============================================================
    访客在分享页点过的照片（按浏览器本地记忆，用于还原 liked 态）

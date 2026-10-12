@@ -3,31 +3,6 @@ import { api, ApiError } from './api'
 import { tr } from './i18n'
 import type { Album, AlbumType, Photo, PhotoInput, ToastType, WallConfig } from './types'
 
-/** localStorage 超配额（语言偏好等小状态）不应导致应用崩溃 */
-export const safeLocalStorage = {
-  getItem: (name: string): string | null => {
-    try {
-      return localStorage.getItem(name)
-    } catch {
-      return null
-    }
-  },
-  setItem: (name: string, value: string): void => {
-    try {
-      localStorage.setItem(name, value)
-    } catch {
-      /* 容量不足时放弃持久化，仅本次会话生效 */
-    }
-  },
-  removeItem: (name: string): void => {
-    try {
-      localStorage.removeItem(name)
-    } catch {
-      /* noop */
-    }
-  },
-}
-
 function uid(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
 }

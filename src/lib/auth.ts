@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { safeLocalStorage } from './store'
+import { safeLocalStorage } from './localStorage'
 import { refreshTokens, revokeToken, type OAuthUser, type TokenSet } from './oauth'
 
 interface AuthState {
