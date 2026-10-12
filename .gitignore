@@ -6,3 +6,5 @@ dist
 .dev.vars
 .zcode
 gui-test-screenshots
+
+prod-tail.log

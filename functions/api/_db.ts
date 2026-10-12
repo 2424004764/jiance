@@ -73,6 +73,7 @@ export async function requireUid(request: Request): Promise<UidResult> {
   }
   const uid = user.data?.sub
   if (user.status !== 200 || typeof uid !== 'string' || !uid) {
+    console.error(`[auth] userinfo verify failed: upstream status=${user.status}`)
     return { ok: false, res: jsonReply({ error: 'server_error', error_description: '无法验证登录状态，请稍后重试' }, 502) }
   }
   return { ok: true, uid }
@@ -320,7 +321,7 @@ export function insertAlbumStmt(db: D1Like, uid: string, row: AlbumRow, orIgnore
 export function insertPhotoStmt(db: D1Like, uid: string, row: PhotoRow, orIgnore = false): D1Stmt {
   return db
     .prepare(
-      `INSERT ${orIgnore ? 'OR IGNORE ' : ''}INTO photos (${PHOTO_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT ${orIgnore ? 'OR IGNORE ' : ''}INTO photos (uid, ${PHOTO_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       uid,

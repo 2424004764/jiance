@@ -21,7 +21,9 @@ export const onRequestGet = async ({ request, env }: { request: Request; env: En
       albums: albums.map((a) => albumJson(a, byAlbum.get(a.id) ?? [])),
       photos: photos.map(photoJson),
     })
-  } catch {
-    return jsonReply({ error: 'server_error', error_description: '画廊数据读取失败，请稍后重试' }, 502)
+  } catch (e) {
+    const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+    console.error('[gallery] GET failed:', detail)
+    return jsonReply({ error: 'server_error', error_description: '画廊数据读取失败，请稍后重试', detail }, 502)
   }
 }
