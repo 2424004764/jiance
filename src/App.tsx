@@ -11,7 +11,7 @@ import { SharedAlbumPage } from './pages/SharedAlbumPage'
 import { AuthCallbackPage } from './pages/AuthCallbackPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { useAuth } from './lib/auth'
-import { setGalleryUser, useUploadModal } from './lib/store'
+import { useGallery, useUploadModal } from './lib/store'
 import { imagesFromClipboard, isEditableTarget, setPendingPasteFiles, textFollowsImage } from './lib/clipboard'
 import { isUploadableMedia } from './lib/upload'
 import { pullGallery } from './lib/gallerySync'
@@ -25,11 +25,11 @@ function ScrollToTop() {
   return null
 }
 
-/** 登录态变化 → 切换画廊数据源（本地缓存先上屏，再拉服务端清单合并同步） */
+/** 登录态变化 → 清空本地镜像并从服务端按当前账号整份拉取（数据不落设备） */
 function GallerySync() {
   const uid = useAuth((s) => s.user?.sub ?? null)
   useEffect(() => {
-    setGalleryUser(uid)
+    useGallery.getState().clear()
     if (uid) void pullGallery()
   }, [uid])
   return null

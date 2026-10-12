@@ -4,10 +4,16 @@ pages_build_output_dir = "dist"
 compatibility_date = "2026-09-26"
 
 # 照片对象存储：现行上传走工具站统一凭证（key = subsite/{uid}/{upload_id}/{uuid}.{ext}，
-# 落在工具站为应用登记的专属桶）；本 binding 用于读取、删除对象与元数据命名空间
+# 落在工具站为应用登记的专属桶）；本 binding 用于读取、删除对象与访客点赞计数
 [[r2_buckets]]
 binding = "PHOTOS"
 bucket_name = "jiance-photos"
+
+# 画廊元数据（相册 + 照片记录）唯一事实源；旧 R2 清单首次访问时自动迁入
+[[d1_databases]]
+binding = "DB"
+database_name = "jiance-db"
+database_id = "71d4c1d2-2899-43f4-bc96-f37a0ff1e093"
 
 [vars]
 # 元数据命名空间（_manifests/_shares/_likes）与旧直传照片（jiance/{uid}/…，只读兼容）的应用前缀

@@ -33,18 +33,22 @@ export function MoveModal({ open, onClose, photos, onMoved }: Props) {
   /** 有照片在相册里 → 提供「移出相册」选项 */
   const canMoveToFeed = currentAlbumIds.size > 0
 
-  const move = (targetAlbumId: string | null) => {
-    movePhotos(ids, targetAlbumId)
-    toast(t('move.done', { n: ids.length }))
-    onClose()
-    onMoved()
+  const move = async (targetAlbumId: string | null) => {
+    try {
+      await movePhotos(ids, targetAlbumId)
+      toast(t('move.done', { n: ids.length }))
+      onClose()
+      onMoved()
+    } catch (e) {
+      toast(e instanceof Error && e.message ? e.message : t('err.saveFail'), 'error')
+    }
   }
 
   return (
     <Modal open={open} onClose={onClose} title={t('move.title', { n: ids.length })} width={440}>
       <div className="move-list" role="listbox" aria-label={t('move.title', { n: ids.length })}>
         {canMoveToFeed && (
-          <button type="button" className="move-item" role="option" onClick={() => move(null)}>
+          <button type="button" className="move-item" role="option" onClick={() => void move(null)}>
             <span className="move-item-icon">
               <ClockCounterClockwise size={18} />
             </span>
@@ -64,7 +68,7 @@ export function MoveModal({ open, onClose, photos, onMoved }: Props) {
               role="option"
               disabled={isCurrent}
               aria-selected={isCurrent}
-              onClick={() => move(a.id)}
+              onClick={() => void move(a.id)}
             >
               <span className="move-item-icon alt">
                 {a.type === 'wall' ? <ImagesSquare size={18} /> : <FolderPlus size={18} />}

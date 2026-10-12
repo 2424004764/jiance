@@ -47,7 +47,7 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
     }
   }, [open, album])
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const pw = pwEnabled ? password.trim() : ''
     if (!name.trim()) {
@@ -60,36 +60,42 @@ export function AlbumFormModal({ open, onClose, album }: Props) {
       setShakeKey((k) => k + 1)
       return
     }
-    if (isEdit && album) {
-      const patch: Parameters<typeof updateAlbum>[1] = {
-        name: name.trim(),
-        description: description.trim(),
-        password: pw || null,
-        type,
+    try {
+      if (isEdit && album) {
+        const patch: Parameters<typeof updateAlbum>[1] = {
+          name: name.trim(),
+          description: description.trim(),
+          password: pw || null,
+          type,
+        }
+        if (type === 'wall') {
+          // 已有布局则只换背景；首次切到照片墙时给存量照片生成初始散布
+          const existing = album.wall?.items ?? []
+          const items =
+            existing.length > 0
+              ? existing
+              : autoArrange(albumPhotos(useGallery.getState().photos, album.id))
+          patch.wall = { ...album.wall, background, items }
+        }
+        updateAlbum(album.id, patch)
+        toast(t('form.updated'))
+      } else {
+        const created = await createAlbum({
+          name: name.trim(),
+          description: description.trim(),
+          password: pw || null,
+          type,
+          wall: type === 'wall' ? { background, items: [] } : undefined,
+        })
+        toast(t('form.created'))
+        onClose()
+        navigate(`/album/${created.id}`)
+        return
       }
-      if (type === 'wall') {
-        // 已有布局则只换背景；首次切到照片墙时给存量照片生成初始散布
-        const existing = album.wall?.items ?? []
-        const items =
-          existing.length > 0
-            ? existing
-            : autoArrange(albumPhotos(useGallery.getState().photos, album.id))
-        patch.wall = { ...album.wall, background, items }
-      }
-      updateAlbum(album.id, patch)
-      toast(t('form.updated'))
-    } else {
-      const created = createAlbum({
-        name: name.trim(),
-        description: description.trim(),
-        password: pw || null,
-        type,
-        wall: type === 'wall' ? { background, items: [] } : undefined,
-      })
-      toast(t('form.created'))
-      navigate(`/album/${created.id}`)
+      onClose()
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : t('err.saveFail'), 'error')
     }
-    onClose()
   }
 
   return (

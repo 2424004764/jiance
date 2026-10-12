@@ -1,69 +1,25 @@
-import { jsonReply, UPSTREAM } from '../oauth/_util'
-import { type AppEnv } from '../_shared'
+import { jsonReply } from '../oauth/_util'
 import { postUpstreamJson } from '../_accounting'
+import { SQL_VARS_LIMIT, requireUid, type Env } from '../_db'
 
 /* ============================================================
-   POST /api/photos/delete —— 批量删除照片的 R2 对象并退还额度
-   鉴权：Bearer access_token（到工具站 userinfo 验证并取 uid）
-   隔离：只接受两个归属前缀下的对象 key，其余一律丢弃，防止
-         越权删除他人对象：
-           subsite/{uid}/…          统一凭证通道（现行），已计入主站额度
-           {应用前缀}/{uid}/…       旧直传通道（jiance/{uid}/…），从未计额
-         画廊清单由客户端经 /api/gallery 推送对齐，这里负责删对象本体
-   额度：删除前逐个 HEAD 拿真实大小，删完把【统一通道】对象的合计
-         退还工具站（used_bytes 是工具站 D1 账本，退款即减账）；
-         旧通道对象从未计过账，删除不退款，防止把其他来源的用量冲掉。
-         对象已不存在（HEAD null）不参与退款，重复删除不会重复刷额度
+   POST /api/photos/delete —— 批量删除照片（全局生效）
+   鉴权：Bearer access_token
+   请求体：{ ids: string[] }（照片记录 id，单次上限 200）
+   服务端一次完成两件事：
+     1. 删除 R2 对象本体（key 由记录 url 推导，并做归属校验），
+        统一凭证通道对象按真实大小向工具站退还额度
+     2. 删除 D1 照片记录 —— 记录没了，任何设备都不会再看到，
+        也不存在旧清单被并集合并"复活"的问题
+   重复删除幂等：对象/记录已不存在时照常返回成功。
    ============================================================ */
 
-const MAX_KEYS = 200
+const MAX_IDS = 200
 const MAX_KEY_LEN = 1024
 
-interface UpstreamUser {
-  sub?: unknown
-}
-
-async function fetchUpstream(
-  path: string,
-  auth: string,
-): Promise<{ status: number; data: Record<string, unknown> | null }> {
-  try {
-    const res = await fetch(`${UPSTREAM}/${path}`, { headers: { Authorization: auth } })
-    const text = await res.text()
-    let data: Record<string, unknown> | null = null
-    try {
-      const parsed = JSON.parse(text)
-      if (parsed && typeof parsed === 'object') data = parsed as Record<string, unknown>
-    } catch {
-      /* 非 JSON 响应按 null 处理 */
-    }
-    return { status: res.status, data }
-  } catch {
-    return { status: 502, data: null }
-  }
-}
-
-export const onRequestPost = async ({ request, env }: { request: Request; env: AppEnv }): Promise<Response> => {
-  const auth = request.headers.get('Authorization')
-  if (!auth) {
-    return jsonReply({ error: 'invalid_token', error_description: '请先登录' }, 401)
-  }
-
-  const user = await fetchUpstream('userinfo', auth)
-  if (user.status === 401) {
-    return jsonReply({ error: 'invalid_token', error_description: '登录已过期，请重新登录' }, 401)
-  }
-  if (user.status === 403) {
-    return jsonReply({ error: 'insufficient_scope', error_description: '登录状态异常，请重新登录' }, 403)
-  }
-  const uid = user.data?.sub
-  if (user.status !== 200 || typeof uid !== 'string' || !uid) {
-    return jsonReply({ error: 'server_error', error_description: '无法验证登录状态，请稍后重试' }, 502)
-  }
-  // uid 参与 key 归属前缀判断，若含路径分隔符会破坏隔离，直接拒绝
-  if (uid.includes('/') || uid.includes('\\') || uid.includes('..')) {
-    return jsonReply({ error: 'server_error', error_description: '账号标识异常，无法执行删除' }, 502)
-  }
+export const onRequestPost = async ({ request, env }: { request: Request; env: Env }): Promise<Response> => {
+  const auth = await requireUid(request)
+  if (!auth.ok) return auth.res
 
   let body: unknown = null
   try {
@@ -71,36 +27,50 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: A
   } catch {
     /* 非 JSON 走下面的校验分支 */
   }
-  const rawKeys = (body as { keys?: unknown } | null)?.keys
-  if (!Array.isArray(rawKeys) || rawKeys.length === 0) {
-    return jsonReply({ error: 'invalid_request', error_description: '请求体需为含 keys 数组的 JSON' }, 400)
+  const rawIds = (body as { ids?: unknown } | null)?.ids
+  if (!Array.isArray(rawIds) || rawIds.length === 0 || rawIds.some((v) => typeof v !== 'string' || !v || v.length > 100)) {
+    return jsonReply({ error: 'invalid_request', error_description: '请求体需为含 ids 数组的 JSON' }, 400)
   }
-  if (rawKeys.length > MAX_KEYS) {
-    return jsonReply({ error: 'invalid_request', error_description: `单次最多删除 ${MAX_KEYS} 张` }, 400)
+  const ids = [...new Set(rawIds as string[])]
+  if (ids.length > MAX_IDS) {
+    return jsonReply({ error: 'invalid_request', error_description: `单次最多删除 ${MAX_IDS} 张` }, 400)
   }
 
+  // 找到属于当前账号的记录（不存在的 id 直接忽略，保证幂等）
+  const rows: { id: string; url: string }[] = []
+  for (let i = 0; i < ids.length; i += SQL_VARS_LIMIT) {
+    const chunk = ids.slice(i, i + SQL_VARS_LIMIT)
+    const placeholders = chunk.map(() => '?').join(', ')
+    const res = await env.DB
+      .prepare(`SELECT id, url FROM photos WHERE uid = ? AND id IN (${placeholders})`)
+      .bind(auth.uid, ...chunk)
+      .all<{ id: string; url: string }>()
+    if (!res.success) {
+      return jsonReply({ error: 'server_error', error_description: '删除失败，请稍后重试' }, 502)
+    }
+    rows.push(...(res.results ?? []))
+  }
+  if (rows.length === 0) {
+    return jsonReply({ ok: true, deleted: 0, refunded: 0, refund_pending: false })
+  }
+
+  // 由 url 推导 R2 key 并做归属校验（越权 key 一律不碰），沿用 /f/ 取图同规则
   const prefix = env.R2_KEY_PREFIX || 'jiance'
-  // 统一凭证通道的对象已计入主站额度（删除要退款）；旧直传通道从未计额（删除不退款）
-  const subsiteOwned = `subsite/${uid}/`
-  const legacyOwned = `${prefix}/${uid}/`
+  const subsiteOwned = `subsite/${auth.uid}/`
+  const legacyOwned = `${prefix}/${auth.uid}/`
   const keys = new Set<string>()
-  for (const k of rawKeys) {
-    if (typeof k !== 'string' || k.length === 0 || k.length > MAX_KEY_LEN) continue
-    if (!k.startsWith(subsiteOwned) && !k.startsWith(legacyOwned)) continue
-    // 与 /f/ 取图同规则：禁相对路径、反斜杠与保留命名空间段（_manifests 等）
-    if (k.includes('..') || k.includes('\\')) continue
-    const rest = k.startsWith(subsiteOwned) ? k.slice(subsiteOwned.length) : k.slice(legacyOwned.length)
-    const segments = rest.split('/')
-    if (segments.some((s) => s.length === 0 || s.startsWith('_'))) continue
-    keys.add(k)
-  }
-  if (keys.size === 0) {
-    return jsonReply({ error: 'invalid_request', error_description: '没有可删除的对象' }, 400)
+  for (const row of rows) {
+    if (!row.url.startsWith('/f/')) continue // 早期 dataURL 照片没有云端对象
+    const key = row.url.slice(3)
+    if (key.length === 0 || key.length > MAX_KEY_LEN) continue
+    if (!key.startsWith(subsiteOwned) && !key.startsWith(legacyOwned)) continue
+    if (key.includes('..') || key.includes('\\')) continue
+    const rest = key.startsWith(subsiteOwned) ? key.slice(subsiteOwned.length) : key.slice(legacyOwned.length)
+    if (rest.split('/').some((s) => s.length === 0 || s.startsWith('_'))) continue
+    keys.add(key)
   }
 
-  // 先 HEAD 拿真实大小，再批量删除。只有统一凭证通道的对象参与退款
-  // （旧通道对象从未计账）；HEAD null（对象早已不存在）→ 跳过退款但 key
-  // 仍进批量删除（幂等无害）；HEAD 网络失败同理，宁可少退不虚报。
+  // 先 HEAD 拿真实大小再删；只有统一凭证通道的对象参与退款（旧通道从未计账）
   let refundBytes = 0
   let headFailures = 0
   for (const key of keys) {
@@ -113,23 +83,31 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: A
     }
   }
 
-  try {
-    await env.PHOTOS.delete([...keys])
-  } catch {
-    return jsonReply({ error: 'server_error', error_description: '对象删除失败，请稍后重试' }, 502)
+  if (keys.size > 0) {
+    try {
+      await env.PHOTOS.delete([...keys])
+    } catch {
+      return jsonReply({ error: 'server_error', error_description: '对象删除失败，请稍后重试' }, 502)
+    }
   }
 
-  // 退还额度（尽力而为）：账本在工具站侧，失败只是这次用量晚一点回落，
-  // 对象本体已删除，不影响删除结果
+  // 删除 D1 记录（分批绕开绑定参数上限）；这一步是"删除全局生效"的落点
+  for (let i = 0; i < ids.length; i += SQL_VARS_LIMIT) {
+    const chunk = ids.slice(i, i + SQL_VARS_LIMIT)
+    const placeholders = chunk.map(() => '?').join(', ')
+    await env.DB.prepare(`DELETE FROM photos WHERE uid = ? AND id IN (${placeholders})`).bind(auth.uid, ...chunk).run()
+  }
+
+  // 退还额度（尽力而为）：失败只是这次用量晚一点回落，不影响删除结果
   let refunded = 0
   if (refundBytes > 0) {
-    const refund = await postUpstreamJson('storage-refund', auth, { bytes: refundBytes })
+    const refund = await postUpstreamJson('storage-refund', request.headers.get('Authorization') ?? '', { bytes: refundBytes })
     if (refund.status === 200) refunded = refundBytes
   }
 
   return jsonReply({
     ok: true,
-    deleted: keys.size,
+    deleted: rows.length,
     refunded,
     refund_pending: refunded < refundBytes || headFailures > 0,
   })

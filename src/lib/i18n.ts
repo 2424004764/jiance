@@ -274,6 +274,7 @@ export const dict = {
     'err.sessionExpired': '登录已过期，请重新登录',
     'err.quota': '存储额度不足，请前往一方工具箱充值后重试',
     'err.requestFail': '请求失败（{code}）',
+    'err.saveFail': '保存失败，请重试',
     'err.quotaData': '额度数据格式异常',
     'err.uploadData': '上传响应格式异常',
 
@@ -572,6 +573,7 @@ export const dict = {
     'err.sessionExpired': 'Session expired, please sign in again',
     'err.quota': 'Not enough storage. Top up at Yifang Toolbox and try again',
     'err.requestFail': 'Request failed ({code})',
+    'err.saveFail': 'Save failed, please try again',
     'err.quotaData': 'Unexpected quota data',
     'err.uploadData': 'Unexpected upload response',
 

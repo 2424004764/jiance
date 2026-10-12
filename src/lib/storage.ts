@@ -117,21 +117,6 @@ export async function uploadPhoto(
   return { key: ticket.key, url: ticket.url, size: blob.size }
 }
 
-/**
- * 批量删除 R2 中的照片对象（服务端校验 key 归属，单次上限 200 个）。
- * 空数组直接返回（早期 dataURL 照片没有云端对象）；失败抛错，
- * 由调用方决定本地是否回退，避免清单先行移除导致对象成为孤儿。
- */
-export async function deletePhotoObjects(keys: string[]): Promise<void> {
-  if (keys.length === 0) return
-  const res = await authedFetch('/api/photos/delete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keys }),
-  })
-  if (!res.ok) throw await parseError(res)
-}
-
 /** 申请统一上传凭证；失败直接抛错（额度 / scope / 会话过期已分类） */
 async function fetchUploadTicket(
   token: string,

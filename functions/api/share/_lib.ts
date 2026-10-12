@@ -1,4 +1,5 @@
-import { likesKey, manifestKey, shareKey, type AppEnv } from '../_shared'
+import { albumJson, findAlbumByShareId, listAlbumPhotos, photoJson, type AppEnv, type D1Like } from '../_db'
+import { likesKey, manifestKey, shareKey } from '../_shared'
 
 /* ============================================================
    分享公开接口共用逻辑（_ 前缀文件不参与路由）
@@ -105,8 +106,39 @@ async function scanManifests(env: AppEnv, prefix: string, shareId: string): Prom
   return null
 }
 
-/** 定位分享：先查索引，未命中 / 失效再兜底扫描 */
-export async function findShare(env: AppEnv, prefix: string, shareId: string): Promise<ShareHit | null> {
+/** D1（现行唯一事实源）里定位分享：相册 + 其照片记录 */
+async function findShareInD1(
+  env: AppEnv & { DB?: D1Like },
+  shareId: string,
+): Promise<ShareHit | null> {
+  if (!env.DB) return null
+  const row = await findAlbumByShareId(env.DB, shareId)
+  if (!row) return null
+  const photoRows = await listAlbumPhotos(env.DB, row.uid, row.id)
+  return {
+    uid: row.uid,
+    album: albumJson(row, photoRows.map((p) => p.id)),
+    photos: photoRows.map(photoJson),
+  }
+}
+
+/** 定位分享：先查 D1（现行数据），未命中再走旧 R2 清单（索引 + 兜底扫描） */
+export async function findShare(
+  env: AppEnv & { DB?: D1Like },
+  prefix: string,
+  shareId: string,
+): Promise<ShareHit | null> {
+  try {
+    const hit = await findShareInD1(env, shareId)
+    if (hit) return hit
+  } catch {
+    /* D1 暂不可用时降级走旧路径 */
+  }
+  return legacyFindShare(env, prefix, shareId)
+}
+
+/** 旧 R2 清单路径（迁移前的存量账号兜底） */
+async function legacyFindShare(env: AppEnv, prefix: string, shareId: string): Promise<ShareHit | null> {
   const pointer = await env.PHOTOS.get(shareKey(prefix, shareId))
   if (pointer) {
     const uid = validUid((await readBody(pointer)).trim())

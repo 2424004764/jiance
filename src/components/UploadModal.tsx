@@ -342,26 +342,33 @@ export function UploadModal() {
       })
     }
 
+    let saved = false
     if (success > 0) {
-      addPhotos(
-        inputs.filter((p) => p.url !== ''),
-        albumId,
-      )
-      toast(failed > 0 ? tr('up.partial', { n: success, m: failed }) : tr('up.done', { n: success }))
-      /* 结算已在各上传完成后发生，这里取一次最新额度刷新展示 */
-      fetchStorageQuota()
-        .then((q) => {
-          setQuota(q)
-          setQuotaState('ok')
-        })
-        .catch(() => {})
+      try {
+        /* 服务端入库（D1 记录）；成功后本地镜像同步，删除/编辑对其他设备即时可见 */
+        await addPhotos(
+          inputs.filter((p) => p.url !== ''),
+          albumId,
+        )
+        saved = true
+        toast(failed > 0 ? tr('up.partial', { n: success, m: failed }) : tr('up.done', { n: success }))
+        /* 结算已在各上传完成后发生，这里取一次最新额度刷新展示 */
+        fetchStorageQuota()
+          .then((q) => {
+            setQuota(q)
+            setQuotaState('ok')
+          })
+          .catch(() => {})
+      } catch (e) {
+        toast(e instanceof Error && e.message ? e.message : tr('err.saveFail'), 'error')
+      }
     } else if (failed > 0) {
       toast(tr('up.allFail'), 'error')
     }
 
     setUploading(false)
     /* 全部成功则自动关闭；有失败的留在弹窗里供查看/重试 */
-    if (success > 0 && failed === 0 && !stopped) {
+    if (saved && failed === 0 && !stopped) {
       setTimeout(() => closeUpload(), 700)
     }
   }

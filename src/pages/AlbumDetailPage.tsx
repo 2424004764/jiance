@@ -372,10 +372,16 @@ export function AlbumDetailPage() {
       <ConfirmModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        onConfirm={() => {
-          deleteAlbum(album.id)
-          navigate('/albums')
+        onConfirm={async () => {
+          try {
+            await deleteAlbum(album.id)
+            navigate('/albums')
+          } catch (e) {
+            toast(e instanceof Error && e.message ? e.message : t('err.saveFail'), 'error')
+            return false
+          }
         }}
+        busyText={t('confirm.deleting')}
         title={t('detail.confirmTitle')}
         desc={t('detail.confirmDesc')}
       />
